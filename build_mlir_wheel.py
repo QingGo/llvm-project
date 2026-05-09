@@ -12,11 +12,14 @@ BUILD_DIR = Path("build")
 WHEELHOUSE = Path("wheelhouse")
 MLIR_PYTHON_PKG = BUILD_DIR / "tools/mlir/python_packages/mlir_core"
 
+
 def run(cmd, **kwargs):
     print(f"Running: {' '.join(str(c) for c in cmd)}")
     subprocess.run(cmd, check=True, **kwargs)
 
+
 def main():
+    # Clean previous build
     if BUILD_DIR.exists():
         shutil.rmtree(BUILD_DIR)
     BUILD_DIR.mkdir()
@@ -53,43 +56,50 @@ def main():
     run(cmake_args)
     run(["ninja", "-C", str(BUILD_DIR), "MLIRPythonModules"])
 
-    # 生成合法的 Python 包版本号（去除 llvmorg- 等前缀）
+    # Generate a PEP 440 version from the LLVM tag (e.g. llvmorg-22.1.5 → 22.1.5)
     raw_version = os.environ.get("LLVM_VERSION", "22.1.5")
     pkg_version = re.sub(r'^[^0-9]*', '', raw_version)
 
-    MLIR_PYTHON_PKG.mkdir(parents=True, exist_ok=True)
-    setup_content = f"""\
-from setuptools import setup, find_packages
+    pkg_dir = MLIR_PYTHON_PKG
+    pkg_dir.mkdir(parents=True, exist_ok=True)
 
-setup(
-    name='mlir-core',
-    version='{pkg_version}',
-    packages=find_packages(where='.'),
-    package_dir={{'': '.'}},
-    package_data={{
-        'mlir': [
-            '_mlir_libs/**/*.pyi',
-            '_mlir_libs/**/*.so',
-            '_mlir_libs/**/*.dylib',
-            '**/*.pyi',
-        ],
-    }},
+    # ---- setup.py ----
+    setup_py = f"""\
+import setuptools  # noqa: E402
+
+setuptools.setup(
+    name="mlir-core",
+    version="{pkg_version}",
+    packages=setuptools.find_namespace_packages(where="."),
     include_package_data=True,
-    python_requires='>=3.10',
+    python_requires=">=3.10",
 )
 """
-    (MLIR_PYTHON_PKG / "setup.py").write_text(setup_content)
-    print(f"Created setup.py with version {pkg_version}")
+    (pkg_dir / "setup.py").write_text(setup_py)
+
+    # ---- MANIFEST.in ----
+    manifest = """\
+recursive-include mlir *.py
+recursive-include mlir *.so
+recursive-include mlir *.dylib
+recursive-include mlir *.pyi
+recursive-include mlir *.h
+recursive-include mlir *.typed
+"""
+    (pkg_dir / "MANIFEST.in").write_text(manifest)
+
+    print(f"Generated setup.py and MANIFEST.in for version {pkg_version}")
 
     run([
         python_exe, "-m", "pip", "wheel",
         "-w", str(WHEELHOUSE.resolve()),
-        str(MLIR_PYTHON_PKG.resolve()),
+        str(pkg_dir.resolve()),
     ])
 
     print(f"\n✅ Wheel built successfully. Find it in: {WHEELHOUSE}")
     for whl in WHEELHOUSE.glob("*.whl"):
         print(whl.name)
+
 
 if __name__ == "__main__":
     main()
