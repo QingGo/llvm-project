@@ -9,7 +9,8 @@ from pathlib import Path
 
 BUILD_DIR = Path("build")
 WHEELHOUSE = Path("wheelhouse")
-MLIR_PYTHON_PKG = Path("mlir/tools/mlir/python_packages/mlir_core")
+# 👇 修正：使用构建目录下的路径
+MLIR_PYTHON_PKG = BUILD_DIR / "tools/mlir/python_packages/mlir_core"
 
 
 def run(cmd, **kwargs):
@@ -53,11 +54,9 @@ def main():
         ]
 
     run(cmake_args)
-
-    # 👇 修正：使用正确的 Ninja 目标名
     run(["ninja", "-C", str(BUILD_DIR), "MLIRPythonModules"])
 
-    # 构建 wheel
+    # 使用构建目录下的包路径来打 wheel
     run([
         python_exe, "-m", "pip", "wheel",
         "-w", str(WHEELHOUSE.resolve()),
