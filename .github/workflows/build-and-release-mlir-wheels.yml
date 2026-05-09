@@ -1,0 +1,83 @@
+name: Build & Release MLIR Wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_version:
+        description: 'LLVM version tag (e.g. llvmorg-22.1.5)'
+        required: true
+        default: 'llvmorg-22.1.5'
+      python_version:
+        description: 'Python version (e.g. 3.10.19)'
+        required: true
+        default: '3.10.19'
+      target_os:
+        description: 'Target OS'
+        required: true
+        type: choice
+        options:
+          - macos-13        # Intel Mac
+          - macos-latest    # Apple Silicon Mac
+          - ubuntu-latest   # Linux x86_64
+          - windows-latest  # Windows x86_64
+
+jobs:
+  build:
+    runs-on: ${{ github.event.inputs.target_os }}
+    strategy:
+      fail-fast: false
+
+    env:
+      LLVM_VERSION: ${{ github.event.inputs.llvm_version }}
+      PYTHON_VERSION: ${{ github.event.inputs.python_version }}
+
+    steps:
+      - name: Checkout LLVM
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.LLVM_VERSION }}
+
+      - name: Setup Python & uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          version: "latest"
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake ccache
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install ninja cmake ccache
+
+      - name: Install system dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install ninja cmake ccache --no-progress -y
+          echo "C:\Program Files\CMake\bin" >> $GITHUB_PATH
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-${{ runner.os }}-${{ env.LLVM_VERSION }}-py${{ env.PYTHON_VERSION }}
+          max-size: 2G
+
+      - name: Build MLIR wheel
+        shell: bash
+        run: |
+          python build_mlir_wheel.py
+
+      - name: Upload wheel to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.LLVM_VERSION }}
+          files: wheelhouse/*.whl
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
