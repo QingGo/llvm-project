@@ -24,10 +24,8 @@ def main():
     BUILD_DIR.mkdir()
     WHEELHOUSE.mkdir(exist_ok=True)
 
-    # Determine Python executable
     python_exe = sys.executable
 
-    # CMake configuration
     cmake_args = [
         "cmake",
         "-G", "Ninja",
@@ -41,15 +39,13 @@ def main():
         "-DCMAKE_BUILD_TYPE=Release",
     ]
 
-    # macOS specific: target the appropriate architecture
     if platform.system() == "Darwin":
-        arch = platform.machine()  # 'x86_64' or 'arm64'
+        arch = platform.machine()
         cmake_args += [
             "-DCMAKE_OSX_ARCHITECTURES=" + arch,
             "-DLLVM_TARGETS_TO_BUILD=Native",
         ]
 
-    # Windows specific: use clang-cl or MSVC (Ninja works with both)
     if platform.system() == "Windows":
         cmake_args += [
             "-DCMAKE_C_COMPILER=clang-cl",
@@ -58,10 +54,10 @@ def main():
 
     run(cmake_args)
 
-    # Build the Python bindings target
-    run(["ninja", "-C", str(BUILD_DIR), "mlir-python-bindings"])
+    # 👇 修正：使用正确的 Ninja 目标名
+    run(["ninja", "-C", str(BUILD_DIR), "MLIRPythonModules"])
 
-    # Build the wheel using pip
+    # 构建 wheel
     run([
         python_exe, "-m", "pip", "wheel",
         "-w", str(WHEELHOUSE.resolve()),
