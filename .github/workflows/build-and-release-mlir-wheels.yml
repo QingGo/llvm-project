@@ -48,6 +48,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           version: "latest"
 
+      - name: Install Python build dependencies
+        run: pip install nanobind
+
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
