@@ -2,6 +2,7 @@
 """Cross‑platform build script for MLIR Python bindings wheel."""
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -10,8 +11,6 @@ from pathlib import Path
 BUILD_DIR = Path("build")
 WHEELHOUSE = Path("wheelhouse")
 MLIR_PYTHON_PKG = BUILD_DIR / "tools/mlir/python_packages/mlir_core"
-# 在生成最终包之前的临时依赖目录(由 ninja 构建)
-MLIR_PYTHON_PKG_SRC = BUILD_DIR / "tools/mlir/python_packages/mlir_core/mlir"
 
 def run(cmd, **kwargs):
     print(f"Running: {' '.join(str(c) for c in cmd)}")
@@ -54,32 +53,18 @@ def main():
     run(cmake_args)
     run(["ninja", "-C", str(BUILD_DIR), "MLIRPythonModules"])
 
-    # 确保目标目录存在
+    # 生成合法的 Python 包版本号（去除 llvmorg- 等前缀）
+    raw_version = os.environ.get("LLVM_VERSION", "22.1.5")
+    pkg_version = re.sub(r'^[^0-9]*', '', raw_version)
+
     MLIR_PYTHON_PKG.mkdir(parents=True, exist_ok=True)
-    
-    # 创建 setup.py
-    setup_content = f"""
+    setup_content = f"""\
 from setuptools import setup, find_packages
-from pathlib import Path
-import os
-
-this_directory = Path(__file__).parent
-packages = find_packages(where=str(this_directory))
-
-package_data = {{}}
-for package in packages:
-    pkg_path = this_directory / package.replace('.', '/')
-    for root, dirs, files in os.walk(pkg_path):
-        for file in files:
-            if file.endswith(('.so', '.dylib', '.pyd', '.pyi')):
-                rel_path = os.path.relpath(root, this_directory)
-                pattern = os.path.join(rel_path, '**', file).split(os.sep, 1)[1]
-                package_data.setdefault(package, []).append(pattern)
 
 setup(
     name='mlir-core',
-    version='{os.environ.get('LLVM_VERSION', '22.1.5')}',
-    packages=[p for p in packages if p.startswith('mlir')],
+    version='{pkg_version}',
+    packages=find_packages(where='.'),
     package_dir={{'': '.'}},
     package_data={{
         'mlir': [
@@ -94,7 +79,7 @@ setup(
 )
 """
     (MLIR_PYTHON_PKG / "setup.py").write_text(setup_content)
-    print(f"Created setup.py in {MLIR_PYTHON_PKG}")
+    print(f"Created setup.py with version {pkg_version}")
 
     run([
         python_exe, "-m", "pip", "wheel",
@@ -105,7 +90,6 @@ setup(
     print(f"\n✅ Wheel built successfully. Find it in: {WHEELHOUSE}")
     for whl in WHEELHOUSE.glob("*.whl"):
         print(whl.name)
-
 
 if __name__ == "__main__":
     main()
