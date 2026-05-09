@@ -38,6 +38,11 @@ jobs:
         with:
           ref: ${{ env.LLVM_VERSION }}
 
+      - name: Fetch build script from main branch
+        run: |
+          git fetch origin main
+          git checkout origin/main -- build_mlir_wheel.py
+
       - name: Setup Python & uv
         uses: astral-sh/setup-uv@v5
         with:
