@@ -49,7 +49,7 @@ jobs:
           version: "latest"
 
       - name: Install Python build dependencies
-        run: uv pip install nanobind
+        run: uv pip install nanobind typing_extensions
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
