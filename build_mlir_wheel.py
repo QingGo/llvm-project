@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Cross‑platform build script for MLIR Python bindings wheel.
-Version: 2.0 - Fix wheel platform tag
+Version: 2.1 - Robust version parsing for LLVM tags
 """
 
 import os
@@ -17,25 +17,45 @@ BUILD_DIR = Path("build")
 WHEELHOUSE = Path("wheelhouse")
 MLIR_PYTHON_PKG = BUILD_DIR / "tools/mlir/python_packages/mlir_core"
 
-# --- Helper Functions ---
+
 def run(cmd, **kwargs):
     """Run a command, printing it and checking its return code."""
     print(f"Running: {' '.join(str(c) for c in cmd)}")
     subprocess.run(cmd, check=True, **kwargs)
 
-def get_generated_packages(base_dir: Path) -> list[str]:
-    """Scans the base directory to find all generated Python packages."""
-    packages = set()
-    for root, dirs, files in os.walk(base_dir):
-        # Filter out __pycache__ and other hidden directories
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-        # Add all directories that contain Python files
-        if any(f.endswith('.py') for f in files):
-            rel_path = Path(root).relative_to(base_dir)
-            packages.add(str(rel_path).replace(os.sep, '.'))
-    return list(packages)
 
-# --- Main Script ---
+def get_pep440_version(raw_tag: str) -> str:
+    """
+    Convert an LLVM tag like 'llvmorg-22.1.5' or 'llvmorg-23-init'
+    into a valid PEP 440 version.
+    """
+    # 1. Remove any leading non-numeric prefix (e.g., "llvmorg-")
+    version = re.sub(r'^[^0-9]*', '', raw_tag)
+
+    # 2. Handle special development tags
+    #    '23-init' -> '23.0.0.dev0'
+    #    '23-dev'  -> '23.0.0.dev0'
+    if re.search(r'-(init|dev)', version):
+        base = version.split('-')[0]
+        # If the base is just a major number (e.g., "23"), add ".0.0"
+        if re.match(r'^\d+$', base):
+            version = f"{base}.0.0.dev0"
+        else:
+            version = f"{base}.dev0"
+        return version
+
+    # 3. For rc / final tags: if the version already looks like X.Y.Z, it's fine
+    #    Also add '.0' if only major.minor is given (e.g., "22.1" -> "22.1.0")
+    parts = version.split('.')
+    if len(parts) == 2 and all(p.isdigit() for p in parts):
+        version = f"{version}.0"
+
+    # 4. Replace any remaining invalid characters with a dot (just to be safe)
+    version = re.sub(r'[^0-9.]+', '.', version).strip('.')
+
+    return version
+
+
 def main():
     print("===== Step 1: Clean and create directories =====")
     if BUILD_DIR.exists():
@@ -45,9 +65,12 @@ def main():
 
     python_exe = sys.executable
     raw_version = os.environ.get("LLVM_VERSION", "22.1.5")
-    pkg_version = re.sub(r'^[^0-9]*', '', raw_version)  # e.g., llvmorg-22.1.5 -> 22.1.5
+    pkg_version = get_pep440_version(raw_version)
 
-    print(f"===== Step 2: CMake Configuration (LLVM {raw_version}) =====")
+    print(f"Raw LLVM tag: {raw_version}")
+    print(f"PEP 440 version for wheel: {pkg_version}")
+
+    print(f"===== Step 2: CMake Configuration =====")
     cmake_args = [
         "cmake",
         "-G", "Ninja",
@@ -59,7 +82,6 @@ def main():
         "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
         "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
         "-DCMAKE_BUILD_TYPE=Release",
-        # 👇 设置最低部署目标版本，确保生成的二进制兼容性
         f"-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0",
     ]
 
@@ -86,14 +108,7 @@ def main():
     pkg_dir = MLIR_PYTHON_PKG
     pkg_dir.mkdir(parents=True, exist_ok=True)
 
-    # Dynamically discover packages to ensure nothing is missed
-    packages = get_generated_packages(pkg_dir)
-    packages = [p for p in packages if p and not p.startswith('.')]
-    packages_str = ',\n        '.join(f'"{p}"' for p in sorted(packages))
-    
-    print(f"   -> Found {len(packages)} packages to include")
-
-    # --- Generate setup.py ---
+    # Generate setup.py
     setup_py = f"""import setuptools
 
 setuptools.setup(
@@ -102,14 +117,13 @@ setuptools.setup(
     packages=setuptools.find_namespace_packages(where="."),
     include_package_data=True,
     python_requires=">=3.10",
-    # 👇 核心修复：标记为包含外部模块，强制生成平台标签（如 macosx_11_0_x86_64）
+    # Mark as having extension modules to generate platform-specific wheel tag
     has_ext_modules=lambda: True,
 )
 """
     (pkg_dir / "setup.py").write_text(setup_py)
 
-    # --- Generate MANIFEST.in ---
-    # Explicitly include binary and type stub files that setuptools might otherwise miss
+    # Generate MANIFEST.in
     manifest = """recursive-include mlir *.py
 recursive-include mlir *.so
 recursive-include mlir *.dylib
@@ -123,7 +137,7 @@ global-exclude __pycache__
 """
     (pkg_dir / "MANIFEST.in").write_text(manifest)
 
-    print("   -> setup.py and MANIFEST.in generated successfully.")
+    print(f"   -> setup.py and MANIFEST.in generated (version {pkg_version})")
 
     print("===== Step 5: Build Wheel Package =====")
     run([
@@ -137,6 +151,7 @@ global-exclude __pycache__
     for whl in sorted(WHEELHOUSE.glob("*.whl")):
         size_mb = whl.stat().st_size / (1024 * 1024)
         print(f"  - {whl.name} ({size_mb:.1f} MB)")
+
 
 if __name__ == "__main__":
     main()
